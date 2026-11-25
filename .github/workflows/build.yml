@@ -1,0 +1,86 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  TYPESCRIPT: typescript@7.0.2
+  COMICS: skills/show-in-comics/scripts
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22.18.0', 'lts/*', 'current']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Lint the shell scripts
+        run: shellcheck skills/*/scripts/*.sh "$COMICS/comics"
+
+      - name: Type-check
+        run: npx -y -p "$TYPESCRIPT" tsc -p "$COMICS/comics-src" --noEmit
+
+      - name: Render the example from source
+        run: |
+          "$COMICS/comics" validate skills/show-in-comics/examples/small.json
+          "$COMICS/comics" render skills/show-in-comics/examples/small.json -o "$RUNNER_TEMP/source.html"
+
+      - name: Compile
+        run: |
+          npx -y -p "$TYPESCRIPT" tsc -p "$COMICS/comics-src" --outDir "$COMICS/comics-dist"
+          cp "$COMICS"/comics-src/page.{html,css,js} "$COMICS/comics-dist/"
+
+      - name: Render the example from the compiled build
+        run: |
+          "$COMICS/comics" render skills/show-in-comics/examples/small.json -o "$RUNNER_TEMP/compiled.html"
+          cmp "$RUNNER_TEMP/source.html" "$RUNNER_TEMP/compiled.html"
+
+      - name: Collect this repository's history
+        run: '"$COMICS/collect-changes.sh" HEAD | jq -e ".changes | length > 0"'
+
+      - name: Validate the plan template
+        run: skills/write-plan/scripts/validate-plan.sh skills/write-plan/assets/execplan-template.md
+
+      - name: Package
+        if: matrix.node == 'lts/*'
+        working-directory: skills
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          for s in */; do zip -qr "$RUNNER_TEMP/dist/${s%/}.zip" "${s%/}"; done
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.node == 'lts/*'
+        with:
+          name: skills
+          path: ${{ runner.temp }}/dist/*.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: skills
+          path: dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --repo "$GITHUB_REPOSITORY" --generate-notes

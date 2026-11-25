@@ -1,0 +1,20 @@
+#!/bin/bash
+# Runs the comics renderer with Node: the compiled build in comics-dist when it
+# exists, otherwise the TypeScript source through Node's type stripping.
+#
+# COMICS_CWD passes the caller's directory, so relative model and page paths
+# resolve where the user invoked it.
+set -euo pipefail
+
+command -v node >/dev/null || { echo "Error: Node.js required (node not on PATH)" >&2; exit 1; }
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -f "$dir/comics-dist/comics.js" ]]; then
+  exec env COMICS_CWD="$(pwd)" node "$dir/comics-dist/comics.js" "$@"
+fi
+if [[ "$(node -p 'Boolean(process.features.typescript)')" != true ]]; then
+  echo "Error: comics-src needs Node 22.18 or newer to run TypeScript (23.x: 23.6 or newer; found $(node --version))" >&2
+  exit 1
+fi
+# Node 22.18 to 23.x warns that type stripping is experimental.
+exec env COMICS_CWD="$(pwd)" node --disable-warning=ExperimentalWarning "$dir/comics-src/comics.ts" "$@"

@@ -1,0 +1,98 @@
+{
+  "title": "MCP search for lawyers",
+  "summary": "Adds an MCP gateway in front of the indexer so lawyers can search their documents from Claude. The legacy nightly sync goes away; the indexer now re-indexes from change events.",
+  "source": {"label": "Gerrit chain 6231→6239 plus one local commit (10 changes)", "url": "https://gerrit.example.com/q/topic:mcp-search"},
+  "changes": [
+    {"id": "6231", "subject": "mcp-gateway: scaffold the Connect service and router", "url": "https://gerrit.example.com/c/acme/+/6231", "insertions": 412, "deletions": 0},
+    {"id": "6232", "subject": "mcp-gateway: add auth middleware with token introspection", "url": "https://gerrit.example.com/c/acme/+/6232", "insertions": 388, "deletions": 12},
+    {"id": "6233", "subject": "mcp-gateway: register the search tool", "url": "https://gerrit.example.com/c/acme/+/6233", "insertions": 156, "deletions": 4},
+    {"id": "6234", "subject": "mcp-gateway: write an audit record per tool call", "url": "https://gerrit.example.com/c/acme/+/6234", "insertions": 201, "deletions": 0},
+    {"id": "6235", "subject": "indexer: consume change events from JetStream", "url": "https://gerrit.example.com/c/acme/+/6235", "insertions": 274, "deletions": 61},
+    {"id": "6236", "subject": "indexer: embed chunks and upsert into pgvector", "url": "https://gerrit.example.com/c/acme/+/6236", "insertions": 530, "deletions": 18},
+    {"id": "6237", "subject": "doc-store: migration 0042 drops legacy_path", "url": "https://gerrit.example.com/c/acme/+/6237", "insertions": 40, "deletions": 95},
+    {"id": "6238", "subject": "doc-store: publish change events", "url": "https://gerrit.example.com/c/acme/+/6238", "insertions": 133, "deletions": 7},
+    {"id": "6239", "subject": "legacy-sync: delete the nightly sync job", "url": "https://gerrit.example.com/c/acme/+/6239", "insertions": 0, "deletions": 870},
+    {"id": "4d31bf01f5ae", "subject": "indexer: drop the BM25 ranker", "insertions": 9, "deletions": 412}
+  ],
+  "root": {
+    "title": "System context",
+    "summary": "Who talks to what once the chain lands.",
+    "nodes": [
+      {"id": "lawyer", "name": "Lawyer", "kind": "person", "status": "unchanged", "tech": "Claude Desktop", "summary": "Searches case documents from a chat."},
+      {"id": "search", "name": "Document search", "kind": "system", "status": "changed", "tech": "Go, PostgreSQL, NATS", "summary": "Finds case documents by meaning for lawyers and their assistants.", "detail": "The MCP gateway is new. The indexer moves from a nightly sync to change events.", "changes": ["6231", "6235", "6237"],
+        "view": {
+          "title": "Document search",
+          "summary": "The containers: the new gateway, the indexer and the stores they share.",
+          "nodes": [
+            {"id": "mcp-gateway", "name": "MCP gateway", "kind": "service", "status": "added", "tech": "Go · Connect", "summary": "Speaks MCP to clients and turns tool calls into indexer searches.", "detail": "New service. Every tool call is authenticated, dispatched and audited.\n\n- runs as 2 replicas behind the auth proxy\n- exposes `/mcp` over HTTPS\n\n**Review focus:** the auth middleware and the audit write.", "changes": ["6231", "6232", "6233", "6234"], "files": ["services/mcp-gateway/main.go", "services/mcp-gateway/router.go", "deploy/mcp-gateway/values.yaml"], "flags": [{"level": "decision", "title": "Tokens are validated on every call, not once per session", "detail": "Costs one introspection round trip per call unless cached.", "changes": ["6232"]}],
+              "view": {
+                "title": "MCP gateway",
+                "summary": "Inside the gateway: routing, auth, tools and the audit trail.",
+                "nodes": [
+                  {"id": "router", "name": "Request router", "kind": "component", "status": "added", "tech": "connect-go", "summary": "Parses MCP requests and routes them.", "changes": ["6231"], "files": ["services/mcp-gateway/router.go"]},
+                  {"id": "policy", "name": "Policy check", "kind": "component", "status": "added", "tech": "OPA rego", "summary": "Decides from token claims whether the tool call is allowed.", "changes": ["6232"]},
+                  {"id": "introspector", "name": "Token introspector", "kind": "component", "status": "added", "tech": "Go", "summary": "Asks the identity provider whether a token is live.", "flags": [{"level": "question", "title": "Should introspection failures fail open or closed?", "detail": "Today a timeout returns `401`. That locks everyone out when the IdP is slow."}], "changes": ["6232"]},
+                  {"id": "token-cache", "name": "Token cache", "kind": "store", "status": "added", "tech": "in-memory LRU", "summary": "Keeps introspection results for five minutes.", "flags": [{"level": "risk", "title": "A revoked token stays valid for up to five minutes", "changes": ["6232"]}]},
+                  {"id": "tools", "name": "Tool registry", "kind": "component", "status": "added", "tech": "Go", "summary": "Maps MCP tool names to handlers.", "changes": ["6233"], "flags": [{"level": "decision", "title": "The tool list is static; no runtime registration"}]},
+                  {"id": "audit-log", "name": "Audit log", "kind": "store", "status": "added", "tech": "PostgreSQL", "summary": "One row per tool call: who, what, when.", "changes": ["6234"], "flags": [{"level": "irreversible", "title": "Audit rows are append-only and have no retention policy", "detail": "Once written they can only be removed by a manual migration.", "changes": ["6234"]}]}
+                ],
+                "edges": [
+                  {"from": "lawyer", "to": "router", "label": "MCP over HTTPS", "status": "added"},
+                  {"from": "router", "to": "policy", "label": "every request", "status": "added", "changes": ["6232"]},
+                  {"from": "policy", "to": "introspector", "label": "needs token claims", "status": "added"},
+                  {"from": "introspector", "to": "token-cache", "label": "caches results for 5 min", "status": "added", "flags": [{"level": "risk", "title": "Cache TTL is hard-coded", "detail": "No config knob; changing it needs a release."}]},
+                  {"from": "introspector", "to": "idp", "label": "POST /oauth/v2/introspect", "status": "added", "changes": ["6232"]},
+                  {"from": "router", "to": "tools", "label": "dispatches the tool call", "status": "added", "changes": ["6233"]},
+                  {"from": "tools", "to": "search-api", "label": "forwards searches", "status": "added", "changes": ["6233"]},
+                  {"from": "tools", "to": "audit-log", "label": "writes an audit record", "status": "added", "detail": "Written after the reply is sent.", "changes": ["6234"], "flags": [{"level": "risk", "title": "A crash after the reply loses the audit record", "changes": ["6234"]}]}
+                ]
+              }
+            },
+            {"id": "indexer", "name": "Indexer", "kind": "service", "status": "changed", "tech": "Go", "summary": "Keeps the vector index in step with the document store.", "changes": ["6235", "6236", "4d31bf01f5ae"],
+              "view": {
+                "title": "Indexer",
+                "summary": "Event-driven re-indexing replaces the nightly sync.",
+                "nodes": [
+                  {"id": "consumer", "name": "Event consumer", "kind": "component", "status": "changed", "tech": "nats.go", "summary": "Pulls document change events.", "changes": ["6235"]},
+                  {"id": "embedder", "name": "Embedder", "kind": "component", "status": "added", "tech": "ONNX runtime", "summary": "Chunks text and computes embeddings.", "changes": ["6236"], "flags": [{"level": "question", "title": "Batch size of 32 was picked by hand"}]},
+                  {"id": "vectors", "name": "Vector index", "kind": "store", "status": "added", "tech": "pgvector", "summary": "Embeddings per document chunk.", "changes": ["6236"], "flags": [{"level": "irreversible", "title": "The first index build rewrites the chunks table", "detail": "Rolling back needs a restore from backup.", "changes": ["6236"]}]},
+                  {"id": "search-api", "name": "Search API", "kind": "component", "status": "changed", "tech": "Connect", "summary": "Nearest-neighbour search over the vector index.", "changes": ["6236"]},
+                  {"id": "old-ranker", "name": "BM25 ranker", "kind": "component", "status": "removed", "tech": "Bleve", "summary": "Keyword ranking, replaced by vectors.", "changes": ["4d31bf01f5ae"]}
+                ],
+                "edges": [
+                  {"from": "ingest-queue", "to": "consumer", "label": "pulls change events", "status": "added", "changes": ["6235"]},
+                  {"from": "tools", "to": "search-api", "label": "searches over Connect", "status": "added", "changes": ["6233"]},
+                  {"from": "consumer", "to": "doc-store", "label": "fetches the document", "status": "changed"},
+                  {"from": "consumer", "to": "embedder", "label": "hands over text", "status": "added"},
+                  {"from": "embedder", "to": "vectors", "label": "upserts vectors", "status": "added", "changes": ["6236"]},
+                  {"from": "search-api", "to": "vectors", "label": "nearest neighbours", "status": "added"},
+                  {"from": "search-api", "to": "old-ranker", "label": "ranks by keywords", "status": "removed", "changes": ["4d31bf01f5ae"]}
+                ]
+              }
+            },
+            {"id": "doc-store", "name": "Document store", "kind": "store", "status": "changed", "tech": "PostgreSQL 16", "summary": "Case documents and their metadata.", "changes": ["6237", "6238"], "files": ["db/migrations/0042_drop_legacy_path.sql"], "flags": [{"level": "irreversible", "title": "Migration 0042 drops the legacy_path column", "detail": "Data in `legacy_path` is gone after the migration runs. **No down migration.**", "changes": ["6237"]}]},
+            {"id": "ingest-queue", "name": "Ingest queue", "kind": "queue", "status": "added", "tech": "NATS JetStream", "summary": "Document change events, kept for 7 days.", "changes": ["6238"]}
+          ],
+          "edges": [
+            {"from": "lawyer", "to": "mcp-gateway", "label": "asks over MCP", "status": "added", "changes": ["6231"]},
+            {"from": "mcp-gateway", "to": "idp", "label": "validates tokens", "status": "added", "flags": [{"level": "question", "title": "Is the introspection result cached, and for how long?"}]},
+            {"from": "mcp-gateway", "to": "indexer", "label": "searches documents", "status": "added", "changes": ["6233"]},
+            {"from": "indexer", "to": "mcp-gateway", "label": "streams results", "status": "added"},
+            {"from": "indexer", "to": "doc-store", "label": "reads documents", "status": "changed", "changes": ["6236"]},
+            {"from": "doc-store", "to": "ingest-queue", "label": "emits change events", "status": "added", "changes": ["6238"]},
+            {"from": "ingest-queue", "to": "indexer", "label": "feeds re-indexing", "status": "added", "changes": ["6235"]},
+            {"from": "legacy-sync", "to": "doc-store", "label": "re-indexes every night", "status": "removed", "changes": ["6239"]}
+          ]
+        }
+      },
+      {"id": "legacy-sync", "name": "Legacy sync", "kind": "service", "status": "removed", "tech": "Python cron", "summary": "Nightly full re-index. Deleted.", "changes": ["6239"], "flags": [{"level": "risk", "title": "The nightly reconciliation goes away with it", "detail": "If an event is lost, nothing re-indexes that document."}]},
+      {"id": "idp", "name": "Identity provider", "kind": "external", "status": "unchanged", "tech": "Zitadel", "summary": "Issues and introspects OAuth tokens."}
+    ],
+    "edges": [
+      {"from": "lawyer", "to": "mcp-gateway", "label": "asks over MCP", "status": "added", "changes": ["6231"]},
+      {"from": "lawyer", "to": "doc-store", "label": "opens original files", "status": "unchanged"},
+      {"from": "search", "to": "idp", "label": "validates tokens", "status": "added"},
+      {"from": "legacy-sync", "to": "doc-store", "label": "re-indexes every night", "status": "removed", "changes": ["6239"]}
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Doc.Title}}</title>
+<style>{{.CSS}}</style>
+</head>
+<body>
+<header>
+<h1>{{.Doc.Title}}</h1>
+{{with .Doc.Summary}}<p class="summary">{{.}}</p>{{end}}
+<p class="meta">{{with .Doc.Source}}<a href="{{.URL}}" target="_blank" rel="noopener">{{.Label}}</a> · {{end}}{{.NChanges}} changes · nodes <span class="c st-added">{{.Added}} added</span> <span class="c st-changed">{{.Changed}} changed</span> <span class="c st-removed">{{.Removed}} removed</span>{{if .NFlags}} · <span class="c">⚠ {{.NFlags}} flags</span>{{end}}</p>
+<p class="legend"><span class="sw st-added"></span>added <span class="sw st-changed"></span>changed <span class="sw st-removed"></span>removed <span class="sw st-unchanged"></span>unchanged <i>·</i> <span class="lv fl-irreversible">⚠</span>irreversible <span class="lv fl-risk">⚠</span>risk <span class="lv fl-decision">⚠</span>decision <span class="lv fl-question">⚠</span>question <i>·</i> <span class="dash"></span>external or system <i>·</i> ▸&nbsp;click to open <i>·</i> <span class="pt"></span>edge&nbsp;to&nbsp;outside&nbsp;this&nbsp;view <i>·</i> click&nbsp;outside&nbsp;the&nbsp;boundary to&nbsp;go&nbsp;up <i>·</i> Ctrl&nbsp;or&nbsp;⌘&nbsp;+&nbsp;wheel to&nbsp;zoom</p>
+</header>
+<nav id="crumbs" aria-label="Breadcrumbs"><span id="trail"></span><span id="zbar" role="group" aria-label="Zoom"><button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button><button id="zoom-pct" title="Back to 100% (0)">100%</button><button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button><button id="fit">Fit</button></span></nav>
+<main>
+<div id="canvas">{{range .Views}}{{.SVG}}{{end}}</div>
+<aside id="panel">
+<div id="tabs" role="tablist"><button data-tab="view" class="on">View</button><button data-tab="attention">Attention <span class="n">{{.NFlags}}</span></button><button data-tab="changes">Changes <span class="n">{{.NChanges}}</span></button></div>
+<section id="tab-view" class="tab on"></section>
+<section id="tab-attention" class="tab">{{range .Attention}}
+<h3><span class="lv fl-{{.Level}}">⚠ {{.Level}}</span> <span class="n">{{len .Items}}</span></h3>
+<ul class="att">{{range .Items}}<li><a href="{{.Href}}"><b>{{.Title}}</b><span>{{.Where}}</span></a></li>{{end}}</ul>{{else}}
+<p class="muted">No flags in this model.</p>{{end}}
+</section>
+<section id="tab-changes" class="tab">
+<input id="filter" type="search" placeholder="Filter by id, subject or element" aria-label="Filter changes">
+<ul class="chg">{{range .Changes}}<li data-id="{{.ID}}">{{template "change" .Change}}{{with .Cites}}<div class="cites">{{range .}}<a href="{{.Href}}">{{.Text}}</a>{{end}}</div>{{end}}</li>{{end}}</ul>
+</section>
+<section id="detail"><a id="close" href="#/">× Close</a><div id="body"></div></section>
+</aside>
+</main>
+<svg class="defs" width="0" height="0" aria-hidden="true"><defs>
+<marker id="a-added" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker>
+<marker id="a-changed" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker>
+<marker id="a-removed" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker>
+<marker id="a-unchanged" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker>
+<marker id="a-sel" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker>
+<clipPath id="clip-card"><rect width="210" height="88" rx="10"/></clipPath>
+<clipPath id="clip-store"><path d="M0 9A105 9 0 0 1 210 9V79A105 9 0 0 1 0 79Z"/></clipPath>
+</defs></svg>
+{{range .Views}}<template id="{{.Tpl}}"><h2>{{.V.Title}}</h2>{{with .V.Summary}}<p>{{.}}</p>{{end}}<p class="muted">{{len .V.Nodes}} nodes · {{len .V.Edges}} edges{{if .Flags}} · ⚠ {{.Flags}} flags here and inside{{end}}</p><p class="hint">Click a card marked ▸ to open it, any other card or an arrow for details. An arrow that ends on the boundary leaves this view: click it to see where it goes. Click outside the boundary to go up a level, like Backspace and the breadcrumbs; Esc clears the selection first. Ctrl or ⌘ with the wheel, a pinch, or + and − zoom, 0 returns to 100%, and a drag pans.</p></template>
+{{end}}{{range .Nodes}}<template id="{{.Tpl}}"><p class="dt-meta"><span class="chip st-{{.N.Status}}">{{.N.Status}}</span> {{.N.Kind}}{{with .N.Tech}} · {{.}}{{end}}</p>
+<h2{{if eq .N.Status "removed"}} class="struck"{{end}}>{{.N.Name}}</h2><p class="where">in {{.Where}}</p>
+{{with .N.Summary}}<p class="sum">{{.}}</p>{{end}}{{with .Inside}}<p><a class="btn" href="{{.}}">Open inside ▸</a></p>{{end}}
+{{with .N.Detail}}<div class="md">{{md .}}</div>{{end}}{{template "flags" .Flags}}{{template "changes" .Changes}}
+{{with .N.Files}}<h3>Files</h3><ul class="files">{{range .}}<li><code>{{.}}</code></li>{{end}}</ul>{{end}}</template>
+{{end}}{{range .Edges}}<template id="{{.Tpl}}"><p class="dt-meta"><span class="chip st-{{.E.Status}}">{{.E.Status}}</span> edge</p>
+<h2>{{.E.Label}}</h2><p class="ends"><a href="{{.From.Href}}">{{.From.Text}}</a> → <a href="{{.To.Href}}">{{.To.Text}}</a></p><p class="where">in {{.Where}}</p>
+{{with .E.Detail}}<div class="md">{{md .}}</div>{{end}}{{template "flags" .Flags}}{{template "changes" .Changes}}</template>
+{{end}}
+<script>{{.JS}}</script>
+</body>
+</html>
+{{define "change"}}{{template "cid" .}} <span class="subj">{{.Subject}}</span> <span class="pm"><span class="ins">+{{.Insertions}}</span> <span class="del">−{{.Deletions}}</span></span>{{end}}
+{{define "changes"}}{{if .}}<h3>Changes</h3><ul class="changes" data-ids="{{range $i, $c := .}}{{if $i}} {{end}}{{$c.ID}}{{end}}"></ul>{{end}}{{end}}
+{{define "flags"}}{{if .}}<h3>Flags</h3><ul class="flags">{{range .}}<li><span class="lv fl-{{.Level}}">⚠ {{.Level}}</span> <b>{{.Title}}</b>{{with .Detail}}<div class="md">{{md .}}</div>{{end}}{{with .Refs}}<p class="refs">{{range .}}{{template "cid" .}} {{end}}</p>{{end}}</li>{{end}}</ul>{{end}}{{end}}
+{{define "cid"}}{{if .URL}}<a class="cid" href="{{.URL}}" target="_blank" rel="noopener" title="{{.Subject}}">{{.ID}}</a>{{else}}<span class="cid" title="{{.Subject}}">{{.ID}}</span>{{end}}{{end}}
